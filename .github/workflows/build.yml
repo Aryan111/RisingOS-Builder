@@ -64,7 +64,7 @@ jobs:
       - name: Get User Role
         id: get_role
         env:
-          GH_TOKEN: ${{ secrets.TOKEN }}
+          GH_TOKEN: ${{ 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 }}
         run: |
           OWNERS=$(gh api -H "Accept: application/vnd.github+json" /orgs/RisingOSS-devices/members?role=admin --jq '.[].login')
           STAGING_MEMBERS=$(gh api -H "Accept: application/vnd.github+json" /orgs/RisingOS-staging/members --jq '.[].login')
