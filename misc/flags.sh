@@ -1,67 +1,52 @@
 #!/bin/bash
 
-if [ -z "$VARIANT" ]; then
-    echo "Error: The VARIANT environment variable is not set."
-    exit 1
-fi
-
-value=$(echo "$VARIANT" | tr '[:lower:]' '[:upper:]')
-
-if [[ "$value" != "VANILLA" && "$value" != "CORE" && "$value" != "GAPPS" ]]; then
-    exit 1
-fi
+VARIANT=$(echo "$VARIANT" | tr '[:lower:]' '[:upper:]')
+update_flag() {
+    local flag="$1"
+    local value="$2"
+    local line="$flag := $value"
+    if ! grep -q "$flag" "$tmp_file"; then
+        echo "$line" >> "$tmp_file"
+        changes_made=true
+    elif ! grep -q "$line" "$tmp_file"; then
+        sed -i "s/^$flag :=.*/$line/" "$tmp_file"
+        changes_made=true
+    fi
+}
 
 process_file() {
     local file="$1"
-    local value="$2"
-    tmp_file=$(mktemp)
-    WITH_GMS_handled=false
-    TARGET_CORE_GMS_handled=false
-    TARGET_DEFAULT_PIXEL_LAUNCHER_handled=false
-    while IFS= read -r line; do
-        if [[ "$line" =~ WITH_GMS ]]; then
-            WITH_GMS_handled=true
-            case $value in
-                VANILLA)
-                    line="${line/true/false}"
-                    ;;
-                CORE)
-                    if [[ "$line" == *"false"* ]]; then
-                        line="${line/false/true}"
-                    fi
-                    ;;
-                GAPPS)
-                    line="${line/false/true}"
-                    ;;
-            esac
-        fi
+    local tmp_file=$(mktemp)
+    local changes_made=false
 
-        if [[ "$value" == "CORE" && "$line" =~ TARGET_CORE_GMS ]]; then
-            TARGET_CORE_GMS_handled=true
-            line="TARGET_CORE_GMS := true"
-        fi
+    cp "$file" "$tmp_file"
 
-        if [[ "$value" == "GAPPS" && "$line" =~ TARGET_CORE_GMS && "$line" == *"true"* ]]; then
-            line="TARGET_CORE_GMS := false"
-        fi
+    case "$VARIANT" in
+        VANILLA)
+            update_flag "WITH_GMS" "false"
+            update_flag "TARGET_CORE_GMS" "false"
+            update_flag "TARGET_DEFAULT_PIXEL_LAUNCHER" "false"
+            ;;
+        CORE)
+            update_flag "WITH_GMS" "true"
+            update_flag "TARGET_CORE_GMS" "true"
+            ;;
+        GAPPS)
+            update_flag "WITH_GMS" "true"
+            update_flag "TARGET_CORE_GMS" "false"
+            ;;
+    esac
 
-        if [[ "$value" == "VANILLA" && "$line" =~ TARGET_DEFAULT_PIXEL_LAUNCHER ]]; then
-            TARGET_DEFAULT_PIXEL_LAUNCHER_handled=true
-            line="TARGET_DEFAULT_PIXEL_LAUNCHER := false"
-        fi
-
-        echo "$line" >> "$tmp_file"
-    done < "$file"
-    if [[ "$value" == "VANILLA" && "$WITH_GMS_handled" == "false" ]]; then
+    if [ "$changes_made" = true ]; then
+        mv "$tmp_file" "$file"
+        echo "Modified: $file"
+        echo "  - Updated flags for $VARIANT Build"
+    else
         rm "$tmp_file"
-        return
+        echo "No changes needed for: $file"
     fi
-    mv "$tmp_file" "$file"
 }
 
-files=$(find /home/sketu/rising/device/$BRAND/$CODENAME -name "lineage_$CODENAME.mk")
-echo "Edited flags in: $files"
-
-for file in $files; do
-    process_file "$file" "$value"
+find "/home/sketu/rising/device/$BRAND/$CODENAME" -name "lineage_$CODENAME.mk" | while read -r file; do
+    process_file "$file"
 done

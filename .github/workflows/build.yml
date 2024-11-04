@@ -70,68 +70,56 @@ jobs:
           STAGING_MEMBERS=$(gh api -H "Accept: application/vnd.github+json" /orgs/RisingOS-staging/members --jq '.[].login')
           DEVICES_MEMBERS=$(gh api -H "Accept: application/vnd.github+json" /orgs/RisingOSS-devices/members --jq '.[].login')
 
-          if echo "$OWNERS" | grep -q "${{ github.actor }}"; then
-            echo "is_owner=true" >> $GITHUB_ENV
-            echo "is_owner=true" >> $GITHUB_OUTPUT
-          else
-            echo "is_owner=false" >> $GITHUB_ENV
-            echo "is_owner=false" >> $GITHUB_OUTPUT
-          fi
+          is_owner=$(echo "$OWNERS" | grep -q "${{ github.actor }}" && echo "true" || echo "false")
+          is_staging_member=$(echo "$STAGING_MEMBERS" | grep -q "${{ github.actor }}" && echo "true" || echo "false")
+          is_devices_member=$(echo "$DEVICES_MEMBERS" | grep -q "${{ github.actor }}" && echo "true" || echo "false")
 
-          if echo "$STAGING_MEMBERS" | grep -q "${{ github.actor }}"; then
-            echo "is_staging_member=true" >> $GITHUB_ENV
-            echo "is_staging_member=true" >> $GITHUB_OUTPUT
-          else
-            echo "is_staging_member=false" >> $GITHUB_ENV
-            echo "is_staging_member=false" >> $GITHUB_OUTPUT
-          fi
+          echo "is_owner=$is_owner" >> $GITHUB_ENV
+          echo "is_staging_member=$is_staging_member" >> $GITHUB_ENV
+          echo "is_devices_member=$is_devices_member" >> $GITHUB_ENV
 
-          if echo "$DEVICES_MEMBERS" | grep -q "${{ github.actor }}"; then
-            echo "is_devices_member=true" >> $GITHUB_ENV
-            echo "is_devices_member=true" >> $GITHUB_OUTPUT
-          else
-            echo "is_devices_member=false" >> $GITHUB_ENV
-            echo "is_devices_member=false" >> $GITHUB_OUTPUT
-          fi
+          echo "is_owner=$is_owner" >> $GITHUB_OUTPUT
+          echo "is_staging_member=$is_staging_member" >> $GITHUB_OUTPUT
+          echo "is_devices_member=$is_devices_member" >> $GITHUB_OUTPUT
 
       - name: Check Builds Limit
         id: check_limit
         run: |
           COUNTER_FILE=".github/workflow_counter.json"
           CURRENT_DATE=$(date +%Y-%m-%d)
-          USER=${{ github.actor }}
+          DEVICE=${{ inputs.CODENAME }}
 
           if [[ ! -f "$COUNTER_FILE" ]] || ! jq empty "$COUNTER_FILE" 2>/dev/null; then
             echo '{}' > "$COUNTER_FILE"
           fi
 
-          TODAY_RUNS=$(jq -r --arg user "$USER" --arg date "$CURRENT_DATE" \
-            'if .[$user][$date] then .[$user][$date] else 0 end' "$COUNTER_FILE")
+          TODAY_RUNS=$(jq -r --arg device "$DEVICE" --arg date "$CURRENT_DATE" \
+            'if .[$device][$date] then .[$device][$date] else 0 end' "$COUNTER_FILE")
 
           if [[ ! "$TODAY_RUNS" =~ ^[0-9]+$ ]]; then
             TODAY_RUNS=0
           fi
 
-          echo "Today's runs: $TODAY_RUNS"
+          echo "Today's runs for device $DEVICE: $TODAY_RUNS"
 
-          if [[ "${{ env.is_owner }}" == "true" && "${{ env.is_staging_member }}" == "false" ]]; then
+          if [[ "${{ env.is_owner }}" == "true" ]]; then
             LIMIT=-1
-          elif [[ "${{ env.is_devices_member }}" == "true" && "${{ env.is_staging_member }}" == "true" ]]; then
+          elif [[ "${{ env.is_staging_member }}" == "true" ]]; then
             LIMIT=5
           else
             LIMIT=3
           fi
 
           if [[ $LIMIT -ne -1 && "$TODAY_RUNS" -ge $LIMIT ]]; then
-            echo "User $USER has reached the daily limit of $LIMIT workflow runs."
+            echo "Device $DEVICE has reached the daily limit of $LIMIT workflow runs."
             exit 1
           fi
 
           NEW_RUNS=$((TODAY_RUNS + 1))
-          jq --arg user "$USER" --arg date "$CURRENT_DATE" --argjson runs "$NEW_RUNS" \
-            '.[$user][$date] = $runs' "$COUNTER_FILE" > tmp.json && mv tmp.json "$COUNTER_FILE"
+          jq --arg device "$DEVICE" --arg date "$CURRENT_DATE" --argjson runs "$NEW_RUNS" \
+            'del(.[$device]) | .[$device][$date] = $runs' "$COUNTER_FILE" > tmp.json && mv tmp.json "$COUNTER_FILE"
 
-          echo "Updated run count: $NEW_RUNS"
+          echo "Updated run count for device $DEVICE: $NEW_RUNS"
 
       - name: Commit and push counter update
         run: |
@@ -139,7 +127,7 @@ jobs:
           git config --global user.email "actions@github.com"
           git config --global user.name "GitHub Actions"
           git add $COUNTER_FILE
-          git commit -m "Update workflow run count for @${{ github.actor }}"
+          git commit -m "Update workflow run count for device ${{ inputs.CODENAME }}"
           git push
         if: steps.check_limit.outcome == 'success'
 
@@ -155,7 +143,6 @@ jobs:
       RELEASE: ${{ inputs.RELEASE }}
       VARIANT: ${{ inputs.VARIANT }}
       STAGING: ${{ needs.check-limit.outputs.staging }}
-      PROJECT: ${{ secrets.PROJECT }}
       SF_HOST: ${{ secrets.SF_HOST }}
       SF_USERNAME: ${{ secrets.SF_USERNAME }}
       SF_PASSWORD: ${{ secrets.SF_PASSWORD }}
@@ -165,11 +152,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Init and Sync
-        run: |
-          if [[ "${{ env.STAGING }}" == "true" ]]; then
-            echo "User is from staging."
-          fi
-          bash resync.sh
+        run: bash resync.sh
 
       - name: Clone Repositories
         run: |
